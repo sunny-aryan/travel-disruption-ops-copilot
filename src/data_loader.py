@@ -21,3 +21,14 @@ def load_cases() -> pd.DataFrame:
     df["sla_deadline"] = pd.to_datetime(df["sla_deadline"])
 
     return df
+
+
+def get_case_by_id(case_id: str) -> dict:
+    """Return a single case as a dictionary."""
+    cases_df = load_cases()
+    matching_cases = cases_df[cases_df["case_id"] == case_id]
+
+    if matching_cases.empty:
+        raise ValueError(f"No case found for case_id: {case_id}")
+
+    return matching_cases.iloc[0].to_dict()
