@@ -291,3 +291,91 @@ def get_supervisor_decisions_for_case(case_id: str) -> pd.DataFrame:
             connection,
             params=(case_id,),
         )
+
+def create_feedback(
+    case_id: str,
+    recommendation_usefulness: str,
+    provider_data_quality: str,
+    override_reason: str,
+    customer_outcome: str,
+    internal_note: str,
+) -> int:
+    """Persist workflow feedback for a case and record an audit event."""
+    created_at = utc_now_iso()
+
+    with get_connection() as connection:
+        cursor = connection.execute(
+            """
+            INSERT INTO feedback (
+                case_id,
+                recommendation_usefulness,
+                provider_data_quality,
+                override_reason,
+                customer_outcome,
+                internal_note,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                case_id,
+                recommendation_usefulness,
+                provider_data_quality,
+                override_reason,
+                customer_outcome,
+                internal_note,
+                created_at,
+            ),
+        )
+
+        feedback_id = cursor.lastrowid
+
+        connection.execute(
+            """
+            INSERT INTO audit_events (
+                case_id,
+                event_type,
+                event_description,
+                created_at
+            )
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                case_id,
+                "feedback_submitted",
+                (
+                    "Workflow feedback submitted: "
+                    f"recommendation_usefulness='{recommendation_usefulness}', "
+                    f"provider_data_quality='{provider_data_quality}', "
+                    f"customer_outcome='{customer_outcome}'."
+                ),
+                created_at,
+            ),
+        )
+
+        connection.commit()
+
+    return int(feedback_id)
+
+
+def get_feedback_for_case(case_id: str) -> pd.DataFrame:
+    """Return feedback history for a case."""
+    with get_connection() as connection:
+        return pd.read_sql_query(
+            """
+            SELECT
+                feedback_id,
+                case_id,
+                recommendation_usefulness,
+                provider_data_quality,
+                override_reason,
+                customer_outcome,
+                internal_note,
+                created_at
+            FROM feedback
+            WHERE case_id = ?
+            ORDER BY created_at DESC
+            """,
+            connection,
+            params=(case_id,),
+        )

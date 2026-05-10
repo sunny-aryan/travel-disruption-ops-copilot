@@ -1,9 +1,11 @@
 from src.db.seed import seed_cases_if_empty
 from src.db.operations import (
     create_decision,
+    create_feedback,
     create_supervisor_decision,
     get_audit_events_for_case,
     get_decisions_for_case,
+    get_feedback_for_case,
     get_supervisor_decisions_for_case,
 )
 from src.db.schema import initialize_database
@@ -135,6 +137,14 @@ def format_cost_delta(value) -> str:
         return "€0.00"
 
     return f"€{value:.2f}"
+
+def show_success_ack() -> None:
+    """Show one-time success acknowledgement after a rerun."""
+    message = st.session_state.get("success_ack")
+
+    if message:
+        st.success(message)
+        del st.session_state["success_ack"]
 
 
 def render_provider_status(provider_response: dict) -> None:
@@ -367,7 +377,11 @@ def render_agent_decision_panel(case: dict, policy_result: dict) -> None:
             )
 
             st.success(f"Decision submitted and recorded. Decision ID: {decision_id}")
-            st.rerun()
+            st.caption(
+                "Case status has been updated. Refresh or change selection to see the updated queue state."
+            )
+            if st.button("Refresh workflow", key=f"refresh_after_decision_{case['case_id']}"):
+                st.rerun()
 
     st.caption("A rationale of at least 10 characters is required for auditability.")
 
@@ -477,7 +491,11 @@ def render_supervisor_decision_panel(case: dict) -> None:
             st.success(
                 f"Supervisor decision recorded. Decision ID: {supervisor_decision_id}"
             )
-            st.rerun()
+            st.caption(
+                "Case status has been updated. Refresh or change selection to see the updated queue state."
+            )
+            if st.button("Refresh workflow", key=f"refresh_after_decision_{case['case_id']}"):
+                st.rerun()
 
     st.caption("Supervisor decisions update case state and are recorded in the audit trail.")
 
@@ -510,12 +528,115 @@ def render_supervisor_decision_history(case_id: str) -> None:
         hide_index=True,
     )
 
+def render_feedback_capture(case: dict) -> None:
+    st.markdown("### Workflow Feedback")
+
+    st.caption(
+        "Capture whether the system recommendation, provider data, and workflow guidance were useful. "
+        "This models a product learning loop rather than model retraining."
+    )
+
+    recommendation_usefulness = st.selectbox(
+        "Was the system guidance useful?",
+        options=["Useful", "Partially useful", "Not useful", "Not applicable"],
+        key=f"feedback_recommendation_{case['case_id']}",
+    )
+
+    provider_data_quality = st.selectbox(
+        "How reliable was the provider data?",
+        options=["Accurate", "Stale", "Missing", "Incorrect", "Not applicable"],
+        key=f"feedback_provider_{case['case_id']}",
+    )
+
+    override_reason = st.selectbox(
+        "Primary reason for override or escalation",
+        options=[
+            "No override",
+            "Provider uncertainty",
+            "Policy risk",
+            "Customer impact",
+            "Cost concern",
+            "Missing information",
+            "Other",
+        ],
+        key=f"feedback_override_{case['case_id']}",
+    )
+
+    customer_outcome = st.selectbox(
+        "Passenger response / outcome",
+        options=[
+            "Accepted",
+            "Rejected",
+            "No response",
+            "Not contacted yet",
+            "Not applicable",
+        ],
+        key=f"feedback_customer_{case['case_id']}",
+    )
+
+    internal_note = st.text_area(
+        "Internal feedback note",
+        placeholder="What should the product or operations team learn from this case?",
+        key=f"feedback_note_{case['case_id']}",
+    )
+
+    submitted = st.button(
+        "Submit feedback",
+        key=f"submit_feedback_{case['case_id']}",
+    )
+
+    if submitted:
+        if len(internal_note.strip()) < 10:
+            st.error("Please enter an internal note of at least 10 characters.")
+        else:
+            feedback_id = create_feedback(
+                case_id=case["case_id"],
+                recommendation_usefulness=recommendation_usefulness,
+                provider_data_quality=provider_data_quality,
+                override_reason=override_reason,
+                customer_outcome=customer_outcome,
+                internal_note=internal_note.strip(),
+            )
+
+            st.success(f"Feedback recorded. Feedback ID: {feedback_id}")
+
+    st.caption(
+        "Feedback is persisted and recorded in the audit trail. "
+        "A dashboard-level analytics view will be added in a later milestone."
+    )
+
+def render_feedback_history(case_id: str) -> None:
+    st.markdown("### Feedback History")
+
+    feedback_df = get_feedback_for_case(case_id)
+
+    if feedback_df.empty:
+        st.caption("No workflow feedback recorded for this case yet.")
+        return
+
+    st.dataframe(
+        feedback_df[
+            [
+                "feedback_id",
+                "recommendation_usefulness",
+                "provider_data_quality",
+                "override_reason",
+                "customer_outcome",
+                "internal_note",
+                "created_at",
+            ]
+        ],
+        use_container_width=True,
+        hide_index=True,
+    )
+
 def render_supervisor_case_review(case: dict) -> None:
     provider_response = get_recovery_options(case["case_id"])
     policy_result = evaluate_policy(case, provider_response)
 
     st.divider()
     st.subheader(f"Supervisor Review: {case['case_id']}")
+    show_success_ack()
 
     top_col1, top_col2, top_col3, top_col4 = st.columns(4)
 
@@ -565,6 +686,10 @@ def render_supervisor_case_review(case: dict) -> None:
 
     st.divider()
 
+    render_feedback_history(case["case_id"])
+
+    st.divider()
+
     render_audit_trail(case["case_id"])
 
 def render_supervisor_queue(cases_df) -> None:
@@ -609,6 +734,7 @@ def render_case_detail(case: dict) -> None:
     provider_response = get_recovery_options(case["case_id"])
     policy_result = evaluate_policy(case, provider_response)
     st.subheader(f"Case Detail: {case['case_id']}")
+    show_success_ack()
 
     top_col1, top_col2, top_col3, top_col4 = st.columns(4)
 
@@ -682,7 +808,15 @@ def render_case_detail(case: dict) -> None:
 
     st.divider()
 
-    render_recovery_options(provider_response)  
+    render_recovery_options(provider_response)
+
+    st.divider()
+
+    render_feedback_capture(case)
+
+    st.divider()
+
+    render_feedback_history(case["case_id"])
 
     st.divider()
 
@@ -690,7 +824,7 @@ def render_case_detail(case: dict) -> None:
 
     st.divider()
 
-    render_audit_trail(case["case_id"])      
+    render_audit_trail(case["case_id"]) 
 
 
 def main() -> None:
@@ -709,7 +843,9 @@ def main() -> None:
         "Workflow view",
         options=["Agent View", "Supervisor View"],
         horizontal=True,
-    )    
+    )
+
+    show_success_ack()    
 
     cases_df = load_cases()
     cases_df["priority_rank"] = cases_df["disruption_severity"].apply(priority_rank)

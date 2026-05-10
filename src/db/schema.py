@@ -55,7 +55,22 @@ def initialize_database() -> None:
                 created_at TEXT NOT NULL
             )
             """
-        )        
+        )
+
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS feedback (
+                feedback_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                case_id TEXT NOT NULL,
+                recommendation_usefulness TEXT NOT NULL,
+                provider_data_quality TEXT NOT NULL,
+                override_reason TEXT NOT NULL,
+                customer_outcome TEXT NOT NULL,
+                internal_note TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """
+        )                
 
         connection.execute(
             """
