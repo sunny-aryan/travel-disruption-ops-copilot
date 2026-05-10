@@ -1,3 +1,9 @@
+from src.db.operations import (
+    create_decision,
+    get_audit_events_for_case,
+    get_decisions_for_case,
+)
+from src.db.schema import initialize_database
 from datetime import datetime
 from src.policy.policy_engine import evaluate_policy
 
@@ -339,25 +345,84 @@ def render_agent_decision_panel(case: dict, policy_result: dict) -> None:
         key=f"rationale_{case['case_id']}",
     )
 
-    submit_disabled = len(rationale.strip()) < 10
-
-    st.button(
+    submitted = st.button(
         "Submit decision",
-        disabled=True,
-        help=(
-            "Decision persistence will be added in the next milestone. "
-            "Rationale validation is shown here to model the intended workflow."
-            if not submit_disabled
-            else "Enter a rationale of at least 10 characters. Persistence will be added in the next milestone."
-        ),
+        key=f"submit_{case['case_id']}",
+        help="Submit this decision and record an audit event.",
     )
 
-    if submit_disabled:
-        st.caption("A short rationale is required before this decision can be submitted.")
-    else:
-        st.caption(
-            "Decision is ready for submission. Persistence and case state updates will be added next."
-        )
+    if submitted:
+        if len(rationale.strip()) < 10:
+            st.error("Please enter a rationale of at least 10 characters before submitting.")
+        else:
+            decision_id = create_decision(
+                case_id=case["case_id"],
+                selected_action=selected_action,
+                approval_required=approval_required,
+                rationale=rationale.strip(),
+                policy_version=policy_result["policy_version"],
+            )
+
+            st.success(f"Decision submitted and recorded. Decision ID: {decision_id}")
+
+    st.caption("A rationale of at least 10 characters is required for auditability.")
+
+def format_boolean_label(value) -> str:
+    return "Yes" if bool(value) else "No"
+
+
+def render_decision_history(case_id: str) -> None:
+    st.markdown("### Decision History")
+
+    decisions_df = get_decisions_for_case(case_id)
+
+    if decisions_df.empty:
+        st.caption("No decisions recorded for this case yet.")
+        return
+
+    display_df = decisions_df.copy()
+    display_df["selected_action"] = display_df["selected_action"].apply(humanize_action)
+    display_df["approval_required"] = display_df["approval_required"].apply(
+        format_boolean_label
+    )
+
+    st.dataframe(
+        display_df[
+            [
+                "decision_id",
+                "selected_action",
+                "approval_required",
+                "rationale",
+                "policy_version",
+                "created_at",
+            ]
+        ],
+        use_container_width=True,
+        hide_index=True,
+    )
+
+
+def render_audit_trail(case_id: str) -> None:
+    st.markdown("### Audit Trail")
+
+    audit_df = get_audit_events_for_case(case_id)
+
+    if audit_df.empty:
+        st.caption("No audit events recorded for this case yet.")
+        return
+
+    st.dataframe(
+        audit_df[
+            [
+                "event_id",
+                "event_type",
+                "event_description",
+                "created_at",
+            ]
+        ],
+        use_container_width=True,
+        hide_index=True,
+    )
 
 def render_case_detail(case: dict) -> None:
     provider_response = get_recovery_options(case["case_id"])
@@ -436,10 +501,19 @@ def render_case_detail(case: dict) -> None:
 
     st.divider()
 
-    render_recovery_options(provider_response)        
+    render_recovery_options(provider_response)  
+
+    st.divider()
+
+    render_decision_history(case["case_id"])
+
+    st.divider()
+
+    render_audit_trail(case["case_id"])      
 
 
 def main() -> None:
+    initialize_database()
     st.title("Travel Disruption Operations Copilot")
 
     st.markdown(
