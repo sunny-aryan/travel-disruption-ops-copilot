@@ -256,6 +256,109 @@ def render_policy_evaluation(policy_result: dict) -> None:
         for reason in policy_result["reasons"]:
             st.markdown(f"- {reason}")
 
+def build_action_options(policy_result: dict) -> list[dict]:
+    """Build selectable agent actions from deterministic policy output."""
+    action_options = []
+
+    for action in policy_result["allowed_actions"]:
+        action_options.append(
+            {
+                "action": action,
+                "label": f"✅ {humanize_action(action)}",
+                "approval_required": False,
+            }
+        )
+
+    for action in policy_result["supervisor_required_actions"]:
+        action_options.append(
+            {
+                "action": action,
+                "label": f"⚠️ {humanize_action(action)}",
+                "approval_required": True,
+            }
+        )
+
+    return action_options
+
+
+def get_action_guidance(action: str, approval_required: bool) -> str:
+    """Return UX guidance for a selected action."""
+    guidance = {
+        "rebook_passenger": "Use this only when provider data is fresh and the selected rebooking option is reliable.",
+        "issue_refund": "Use this when refund is policy-eligible. High-value or uncertain refunds may require approval.",
+        "wait_for_provider_update": "Use this when provider data is unavailable, stale, partial, or still changing.",
+        "escalate_to_supervisor": "Use this when the case is high-risk, ambiguous, urgent, or blocked by policy.",
+        "prepare_customer_update": "Use this to draft or send a customer-facing update before final resolution.",
+        "mark_resolved": "Use this only after a valid rebooking, refund, or no-action resolution path exists.",
+    }
+
+    base_guidance = guidance.get(
+        action,
+        "Review the policy evaluation and provider status before taking this action.",
+    )
+
+    if approval_required:
+        return f"{base_guidance} This action requires supervisor approval before completion."
+
+    return base_guidance
+
+def render_agent_decision_panel(case: dict, policy_result: dict) -> None:
+    st.markdown("### Agent Decision Panel")
+
+    action_options = build_action_options(policy_result)
+
+    if not action_options:
+        st.error("No selectable actions are currently available for this case.")
+        return
+
+    action_labels = [option["label"] for option in action_options]
+
+    selected_label = st.selectbox(
+        "Proposed action",
+        options=action_labels,
+        key=f"action_{case['case_id']}",
+    )
+
+    selected_option = next(
+        option for option in action_options if option["label"] == selected_label
+    )
+
+    selected_action = selected_option["action"]
+    approval_required = selected_option["approval_required"]
+
+    if approval_required:
+        st.warning("This action requires supervisor approval.")
+    else:
+        st.success("This action is directly allowed by policy.")
+
+    st.info(get_action_guidance(selected_action, approval_required))
+
+    rationale = st.text_area(
+        "Agent rationale",
+        placeholder="Explain why this action is appropriate for this disrupted booking...",
+        key=f"rationale_{case['case_id']}",
+    )
+
+    submit_disabled = len(rationale.strip()) < 10
+
+    st.button(
+        "Submit decision",
+        disabled=True,
+        help=(
+            "Decision persistence will be added in the next milestone. "
+            "Rationale validation is shown here to model the intended workflow."
+            if not submit_disabled
+            else "Enter a rationale of at least 10 characters. Persistence will be added in the next milestone."
+        ),
+    )
+
+    if submit_disabled:
+        st.caption("A short rationale is required before this decision can be submitted.")
+    else:
+        st.caption(
+            "Decision is ready for submission. Persistence and case state updates will be added next."
+        )
+
 def render_case_detail(case: dict) -> None:
     provider_response = get_recovery_options(case["case_id"])
     policy_result = evaluate_policy(case, provider_response)
@@ -325,42 +428,14 @@ def render_case_detail(case: dict) -> None:
         st.info(provider_guidance(provider_response))
 
     with right_col:
-        st.markdown("### Agent Decision Panel")
-
-        st.selectbox(
-            "Proposed action",
-            options=[
-                "Investigate recovery options",
-                "Prepare customer message",
-                "Escalate to supervisor",
-                "Wait for provider update",
-                "Mark as resolved",
-            ],
-            key=f"action_{case['case_id']}",
-        )
-
-        st.text_area(
-            "Agent rationale",
-            placeholder="Explain why this action is appropriate...",
-            key=f"rationale_{case['case_id']}",
-        )
-
-        st.button(
-            "Submit decision",
-            disabled=True,
-            help="Decision persistence will be added in a later milestone.",
-        )
-
-        st.caption(
-            "This panel is currently a UX placeholder. Future milestones will validate actions, persist decisions, and update case state."
-        )
+        render_agent_decision_panel(case, policy_result)
 
     st.divider()
 
     render_policy_evaluation(policy_result)
 
     st.divider()
-    
+
     render_recovery_options(provider_response)        
 
 
