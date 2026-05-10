@@ -1,0 +1,111 @@
+{
+  "CASE-1001": {
+    "provider_status": "healthy",
+    "response_state": "success",
+    "data_freshness_minutes": 3,
+    "provider_message": "Alternative rail options found.",
+    "options": [
+      {
+        "option_id": "OPT-1001-A",
+        "option_type": "rebook",
+        "departure_time": "2026-05-12T09:15:00",
+        "arrival_time": "2026-05-12T13:40:00",
+        "arrival_delay_minutes": 70,
+        "cost_delta_eur": 18.0,
+        "confidence": "high"
+      },
+      {
+        "option_id": "OPT-1001-B",
+        "option_type": "rebook",
+        "departure_time": "2026-05-12T10:30:00",
+        "arrival_time": "2026-05-12T14:55:00",
+        "arrival_delay_minutes": 145,
+        "cost_delta_eur": 0.0,
+        "confidence": "medium"
+      },
+      {
+        "option_id": "OPT-1001-C",
+        "option_type": "refund",
+        "departure_time": null,
+        "arrival_time": null,
+        "arrival_delay_minutes": null,
+        "cost_delta_eur": 0.0,
+        "confidence": "high"
+      }
+    ]
+  },
+  "CASE-1002": {
+    "provider_status": "degraded",
+    "response_state": "partial_response",
+    "data_freshness_minutes": 8,
+    "provider_message": "Delay confirmed. Some recovery options may be missing.",
+    "options": [
+      {
+        "option_id": "OPT-1002-A",
+        "option_type": "wait",
+        "departure_time": "2026-05-12T14:10:00",
+        "arrival_time": "2026-05-12T20:20:00",
+        "arrival_delay_minutes": 55,
+        "cost_delta_eur": 0.0,
+        "confidence": "medium"
+      }
+    ]
+  },
+  "CASE-1003": {
+    "provider_status": "healthy",
+    "response_state": "success",
+    "data_freshness_minutes": 4,
+    "provider_message": "Same-day connection options are limited.",
+    "options": [
+      {
+        "option_id": "OPT-1003-A",
+        "option_type": "rebook",
+        "departure_time": "2026-05-12T12:20:00",
+        "arrival_time": "2026-05-12T20:45:00",
+        "arrival_delay_minutes": 300,
+        "cost_delta_eur": 42.0,
+        "confidence": "medium"
+      },
+      {
+        "option_id": "OPT-1003-B",
+        "option_type": "escalate",
+        "departure_time": null,
+        "arrival_time": null,
+        "arrival_delay_minutes": null,
+        "cost_delta_eur": 0.0,
+        "confidence": "high"
+      }
+    ]
+  },
+  "CASE-1004": {
+    "provider_status": "unavailable",
+    "response_state": "provider_unavailable",
+    "data_freshness_minutes": null,
+    "provider_message": "Provider API unavailable. No fresh recovery options can be retrieved.",
+    "options": []
+  },
+  "CASE-1005": {
+    "provider_status": "healthy",
+    "response_state": "stale_data",
+    "data_freshness_minutes": 47,
+    "provider_message": "Provider returned cached delay information. Data may no longer be reliable.",
+    "options": [
+      {
+        "option_id": "OPT-1005-A",
+        "option_type": "wait",
+        "departure_time": "2026-05-12T17:55:00",
+        "arrival_time": "2026-05-12T19:20:00",
+        "arrival_delay_minutes": 35,
+        "cost_delta_eur": 0.0,
+        "confidence": "low"
+      }
+    ]
+  },
+  "CASE-1006": {
+    "provider_status": "timeout",
+    "response_state": "timeout",
+    "data_freshness_minutes": null,
+    "provider_message": "Provider request timed out. Recovery options could not be loaded.",
+    "options": []
+  }
+}

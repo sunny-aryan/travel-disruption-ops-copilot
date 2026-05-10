@@ -1,8 +1,15 @@
 from datetime import datetime
 
 import streamlit as st
+import pandas as pd
 
 from src.data_loader import get_case_by_id, load_cases
+from src.services.provider_client import (
+    get_recovery_options,
+    is_provider_data_fresh,
+    provider_status_label,
+    response_state_label,
+)
 
 
 st.set_page_config(
@@ -103,6 +110,107 @@ def build_display_queue(cases_df):
         ]
     ]
 
+def format_option_datetime(value) -> str:
+    if value is None or pd.isna(value):
+        return "N/A"
+
+    return pd.to_datetime(value).strftime("%d %b %Y, %H:%M")
+
+
+def format_cost_delta(value) -> str:
+    if value is None:
+        return "N/A"
+
+    if value == 0:
+        return "€0.00"
+
+    return f"€{value:.2f}"
+
+
+def render_provider_status(provider_response: dict) -> None:
+    st.markdown("### Provider Dependency Status")
+
+    provider_status = provider_response["provider_status"]
+    response_state = provider_response["response_state"]
+    freshness = provider_response["data_freshness_minutes"]
+
+    freshness_label = "Unknown" if freshness is None else f"{freshness} min old"
+
+    st.markdown(
+        f"""
+        **Provider status:** {provider_status_label(provider_status)}  
+        **Response state:** {response_state_label(response_state)}  
+        **Data freshness:** {freshness_label}
+        """
+    )
+
+    st.caption(provider_response["provider_message"])
+
+    if not is_provider_data_fresh(provider_response):
+        st.warning(
+            "Provider data is not fresh enough for normal automated recommendation. "
+            "Agent should wait, refresh, or escalate depending on case urgency."
+        )
+
+    if response_state in ["provider_unavailable", "timeout"]:
+        st.error(
+            "Recovery options are unavailable because the provider dependency failed. "
+            "Do not rebook from stale or missing data."
+        )
+
+
+def render_recovery_options(provider_response: dict) -> None:
+    st.markdown("### Recovery Options")
+
+    options = provider_response.get("options", [])
+
+    if not options:
+        st.warning("No recovery options available from provider response.")
+        return
+
+    options_df = pd.DataFrame(options)
+
+    options_df["departure_time"] = options_df["departure_time"].apply(
+        format_option_datetime
+    )
+    options_df["arrival_time"] = options_df["arrival_time"].apply(format_option_datetime)
+    options_df["cost_delta_eur"] = options_df["cost_delta_eur"].apply(format_cost_delta)
+
+    options_df = options_df[
+        [
+            "option_id",
+            "option_type",
+            "departure_time",
+            "arrival_time",
+            "arrival_delay_minutes",
+            "cost_delta_eur",
+            "confidence",
+        ]
+    ]
+
+    st.dataframe(
+        options_df,
+        use_container_width=True,
+        hide_index=True,
+    )
+
+
+def provider_guidance(provider_response: dict) -> str:
+    response_state = provider_response["response_state"]
+
+    if response_state == "success":
+        return "Fresh provider options are available. Agent can evaluate rebooking or refund actions."
+
+    if response_state == "partial_response":
+        return "Provider returned partial data. Agent can continue investigation, but high-risk actions should be reviewed carefully."
+
+    if response_state == "stale_data":
+        return "Provider data is stale. Agent should not rely on these options without refresh or supervisor review."
+
+    if response_state in ["provider_unavailable", "timeout"]:
+        return "Provider dependency failed. Agent should wait for recovery or escalate urgent cases."
+
+    return "Provider response is unclear. Agent should investigate before taking action."
 
 def render_case_detail(case: dict) -> None:
     st.subheader(f"Case Detail: {case['case_id']}")
@@ -159,9 +267,17 @@ def render_case_detail(case: dict) -> None:
             """
         )
 
+        provider_response = get_recovery_options(case["case_id"])
+
+        render_provider_status(provider_response)
+
         st.markdown("### Current Recommended Next Action")
 
         st.info(case["recommended_next_action"])
+
+        st.markdown("### Provider-Aware Guidance")
+
+        st.info(provider_guidance(provider_response))
 
     with right_col:
         st.markdown("### Agent Decision Panel")
@@ -193,6 +309,11 @@ def render_case_detail(case: dict) -> None:
         st.caption(
             "This panel is currently a UX placeholder. Future milestones will validate actions, persist decisions, and update case state."
         )
+
+    st.divider()
+
+    provider_response = get_recovery_options(case["case_id"])
+    render_recovery_options(provider_response)        
 
 
 def main() -> None:
@@ -300,8 +421,8 @@ def main() -> None:
 
     st.divider()
 
-    st.info(
-        "Next milestone: add mock provider recovery options and external dependency states such as success, timeout, stale data, and provider unavailable."
+    st.caption(
+        "Prototype status: provider dependency responses are mocked to simulate success, timeout, stale data, partial responses, and provider unavailability."
     )
 
 
