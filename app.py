@@ -1,4 +1,5 @@
 from datetime import datetime
+from src.policy.policy_engine import evaluate_policy
 
 import streamlit as st
 import pandas as pd
@@ -212,7 +213,52 @@ def provider_guidance(provider_response: dict) -> str:
 
     return "Provider response is unclear. Agent should investigate before taking action."
 
+def humanize_action(action: str) -> str:
+    return action.replace("_", " ").title()
+
+
+def render_policy_evaluation(policy_result: dict) -> None:
+    st.markdown("### Policy Evaluation")
+
+    st.caption(f"Policy version: `{policy_result['policy_version']}`")
+
+    allowed = policy_result["allowed_actions"]
+    blocked = policy_result["blocked_actions"]
+    supervisor_required = policy_result["supervisor_required_actions"]
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.markdown("**Allowed**")
+        if allowed:
+            for action in allowed:
+                st.success(humanize_action(action))
+        else:
+            st.caption("No directly allowed actions.")
+
+    with col2:
+        st.markdown("**Needs Approval**")
+        if supervisor_required:
+            for action in supervisor_required:
+                st.warning(humanize_action(action))
+        else:
+            st.caption("No supervisor approval required.")
+
+    with col3:
+        st.markdown("**Blocked**")
+        if blocked:
+            for action in blocked:
+                st.error(humanize_action(action))
+        else:
+            st.caption("No blocked actions.")
+
+    with st.expander("Policy reasons"):
+        for reason in policy_result["reasons"]:
+            st.markdown(f"- {reason}")
+
 def render_case_detail(case: dict) -> None:
+    provider_response = get_recovery_options(case["case_id"])
+    policy_result = evaluate_policy(case, provider_response)
     st.subheader(f"Case Detail: {case['case_id']}")
 
     top_col1, top_col2, top_col3, top_col4 = st.columns(4)
@@ -267,7 +313,6 @@ def render_case_detail(case: dict) -> None:
             """
         )
 
-        provider_response = get_recovery_options(case["case_id"])
 
         render_provider_status(provider_response)
 
@@ -312,7 +357,10 @@ def render_case_detail(case: dict) -> None:
 
     st.divider()
 
-    provider_response = get_recovery_options(case["case_id"])
+    render_policy_evaluation(policy_result)
+
+    st.divider()
+    
     render_recovery_options(provider_response)        
 
 
