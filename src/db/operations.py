@@ -3,11 +3,29 @@ from datetime import datetime, timezone
 import pandas as pd
 
 from src.db.connection import get_connection
+from src.workflows.state_transitions import derive_next_status
 
 
 def utc_now_iso() -> str:
     """Return current UTC timestamp as ISO string."""
     return datetime.now(timezone.utc).isoformat()
+
+
+def update_case_status(case_id: str, new_status: str) -> None:
+    """Update persisted case workflow status."""
+    updated_at = utc_now_iso()
+
+    with get_connection() as connection:
+        connection.execute(
+            """
+            UPDATE cases
+            SET status = ?, updated_at = ?
+            WHERE case_id = ?
+            """,
+            (new_status, updated_at, case_id),
+        )
+
+        connection.commit()
 
 
 def create_decision(
@@ -17,10 +35,22 @@ def create_decision(
     rationale: str,
     policy_version: str,
 ) -> int:
-    """Persist an agent decision and corresponding audit event."""
+    """Persist an agent decision, update case status, and record audit events."""
     created_at = utc_now_iso()
+    next_status = derive_next_status(selected_action, approval_required)
 
     with get_connection() as connection:
+        current_case = connection.execute(
+            """
+            SELECT status
+            FROM cases
+            WHERE case_id = ?
+            """,
+            (case_id,),
+        ).fetchone()
+
+        previous_status = current_case["status"] if current_case else "UNKNOWN"
+
         cursor = connection.execute(
             """
             INSERT INTO decisions (
@@ -47,6 +77,15 @@ def create_decision(
 
         connection.execute(
             """
+            UPDATE cases
+            SET status = ?, updated_at = ?
+            WHERE case_id = ?
+            """,
+            (next_status, created_at, case_id),
+        )
+
+        connection.execute(
+            """
             INSERT INTO audit_events (
                 case_id,
                 event_type,
@@ -62,6 +101,24 @@ def create_decision(
                     f"Agent submitted action '{selected_action}' "
                     f"with approval_required={approval_required}."
                 ),
+                created_at,
+            ),
+        )
+
+        connection.execute(
+            """
+            INSERT INTO audit_events (
+                case_id,
+                event_type,
+                event_description,
+                created_at
+            )
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                case_id,
+                "case_status_changed",
+                f"Case status changed from '{previous_status}' to '{next_status}'.",
                 created_at,
             ),
         )

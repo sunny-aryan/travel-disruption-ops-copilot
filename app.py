@@ -1,3 +1,4 @@
+from src.db.seed import seed_cases_if_empty
 from src.db.operations import (
     create_decision,
     get_audit_events_for_case,
@@ -364,6 +365,7 @@ def render_agent_decision_panel(case: dict, policy_result: dict) -> None:
             )
 
             st.success(f"Decision submitted and recorded. Decision ID: {decision_id}")
+            st.rerun()
 
     st.caption("A rationale of at least 10 characters is required for auditability.")
 
@@ -514,6 +516,7 @@ def render_case_detail(case: dict) -> None:
 
 def main() -> None:
     initialize_database()
+    seed_cases_if_empty()
     st.title("Travel Disruption Operations Copilot")
 
     st.markdown(

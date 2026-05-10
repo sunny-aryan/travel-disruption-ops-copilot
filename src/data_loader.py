@@ -1,24 +1,49 @@
 import json
-from pathlib import Path
 
 import pandas as pd
 
-
-DATA_PATH = Path("data/seed_cases.json")
+from src.db.connection import get_connection
 
 
 def load_cases() -> pd.DataFrame:
-    """Load synthetic disruption cases from local seed data."""
-    if not DATA_PATH.exists():
-        raise FileNotFoundError(f"Seed data file not found: {DATA_PATH}")
+    """Load disruption cases from local SQLite database."""
+    with get_connection() as connection:
+        df = pd.read_sql_query(
+            """
+            SELECT
+                case_id,
+                booking_id,
+                passenger_name,
+                provider,
+                origin,
+                destination,
+                departure_time,
+                disruption_type,
+                disruption_severity,
+                passenger_count,
+                customer_tier,
+                ticket_value_eur,
+                special_flags,
+                sla_deadline,
+                status,
+                recommended_next_action,
+                created_at,
+                updated_at
+            FROM cases
+            ORDER BY updated_at DESC
+            """,
+            connection,
+        )
 
-    with DATA_PATH.open("r", encoding="utf-8") as file:
-        cases = json.load(file)
-
-    df = pd.DataFrame(cases)
+    if df.empty:
+        return df
 
     df["departure_time"] = pd.to_datetime(df["departure_time"])
     df["sla_deadline"] = pd.to_datetime(df["sla_deadline"])
+
+    df["special_flags"] = df["special_flags"].apply(
+        lambda value: json.loads(value) if isinstance(value, str) else value
+    )
 
     return df
 
