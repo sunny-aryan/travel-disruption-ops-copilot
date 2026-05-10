@@ -45,6 +45,20 @@ def initialize_database() -> None:
 
         connection.execute(
             """
+            CREATE TABLE IF NOT EXISTS supervisor_decisions (
+                supervisor_decision_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                case_id TEXT NOT NULL,
+                supervisor_decision TEXT NOT NULL,
+                rationale TEXT NOT NULL,
+                previous_status TEXT NOT NULL,
+                new_status TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """
+        )        
+
+        connection.execute(
+            """
             CREATE TABLE IF NOT EXISTS audit_events (
                 event_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 case_id TEXT NOT NULL,

@@ -1,8 +1,10 @@
 from src.db.seed import seed_cases_if_empty
 from src.db.operations import (
     create_decision,
+    create_supervisor_decision,
     get_audit_events_for_case,
     get_decisions_for_case,
+    get_supervisor_decisions_for_case,
 )
 from src.db.schema import initialize_database
 from datetime import datetime
@@ -426,6 +428,183 @@ def render_audit_trail(case_id: str) -> None:
         hide_index=True,
     )
 
+def render_supervisor_decision_panel(case: dict) -> None:
+    st.markdown("### Supervisor Decision")
+
+    supervisor_options = {
+        "Approve": "approve",
+        "Reject": "reject",
+        "Request more information": "request_more_information",
+    }
+
+    selected_label = st.selectbox(
+        "Supervisor action",
+        options=list(supervisor_options.keys()),
+        key=f"supervisor_action_{case['case_id']}",
+    )
+
+    selected_decision = supervisor_options[selected_label]
+
+    guidance = {
+        "approve": "Approve when the proposed action is reasonable and the operational risk is acceptable.",
+        "reject": "Reject when the proposed action is unsafe, unsupported by evidence, or violates policy.",
+        "request_more_information": "Use this when the case needs more provider data, agent context, or customer information.",
+    }
+
+    st.info(guidance[selected_decision])
+
+    rationale = st.text_area(
+        "Supervisor rationale",
+        placeholder="Explain the reason for this supervisor decision...",
+        key=f"supervisor_rationale_{case['case_id']}",
+    )
+
+    submitted = st.button(
+        "Submit supervisor decision",
+        key=f"submit_supervisor_{case['case_id']}",
+    )
+
+    if submitted:
+        if len(rationale.strip()) < 10:
+            st.error("Please enter a supervisor rationale of at least 10 characters.")
+        else:
+            supervisor_decision_id = create_supervisor_decision(
+                case_id=case["case_id"],
+                supervisor_decision=selected_decision,
+                rationale=rationale.strip(),
+            )
+
+            st.success(
+                f"Supervisor decision recorded. Decision ID: {supervisor_decision_id}"
+            )
+            st.rerun()
+
+    st.caption("Supervisor decisions update case state and are recorded in the audit trail.")
+
+def render_supervisor_decision_history(case_id: str) -> None:
+    st.markdown("### Supervisor Decision History")
+
+    supervisor_df = get_supervisor_decisions_for_case(case_id)
+
+    if supervisor_df.empty:
+        st.caption("No supervisor decisions recorded for this case yet.")
+        return
+
+    display_df = supervisor_df.copy()
+    display_df["supervisor_decision"] = display_df["supervisor_decision"].apply(
+        humanize_action
+    )
+
+    st.dataframe(
+        display_df[
+            [
+                "supervisor_decision_id",
+                "supervisor_decision",
+                "rationale",
+                "previous_status",
+                "new_status",
+                "created_at",
+            ]
+        ],
+        use_container_width=True,
+        hide_index=True,
+    )
+
+def render_supervisor_case_review(case: dict) -> None:
+    provider_response = get_recovery_options(case["case_id"])
+    policy_result = evaluate_policy(case, provider_response)
+
+    st.divider()
+    st.subheader(f"Supervisor Review: {case['case_id']}")
+
+    top_col1, top_col2, top_col3, top_col4 = st.columns(4)
+
+    with top_col1:
+        st.metric("Priority", priority_label(case["disruption_severity"]))
+
+    with top_col2:
+        st.metric("SLA status", calculate_sla_status(case["sla_deadline"]))
+
+    with top_col3:
+        st.metric("Current status", case["status"])
+
+    with top_col4:
+        st.metric("Ticket value", f"€{case['ticket_value_eur']:.2f}")
+
+    left_col, right_col = st.columns([1.4, 1])
+
+    with left_col:
+        st.markdown("### Case Context")
+
+        st.markdown(
+            f"""
+            **Passenger:** {case["passenger_name"]}  
+            **Route:** {case["origin"]} → {case["destination"]}  
+            **Provider:** {case["provider"]}  
+            **Disruption:** {case["disruption_type"].replace("_", " ").title()}  
+            **Special flags:** {format_flags(case["special_flags"])}
+            """
+        )
+
+        render_provider_status(provider_response)
+
+    with right_col:
+        render_supervisor_decision_panel(case)
+
+    st.divider()
+
+    render_policy_evaluation(policy_result)
+
+    st.divider()
+
+    render_decision_history(case["case_id"])
+
+    st.divider()
+
+    render_supervisor_decision_history(case["case_id"])
+
+    st.divider()
+
+    render_audit_trail(case["case_id"])
+
+def render_supervisor_queue(cases_df) -> None:
+    st.subheader("Supervisor Review Queue")
+
+    supervisor_df = cases_df[
+        cases_df["status"] == "PENDING_SUPERVISOR_APPROVAL"
+    ].copy()
+
+    if supervisor_df.empty:
+        st.success("No cases currently require supervisor review.")
+        return
+
+    supervisor_df["priority_rank"] = supervisor_df["disruption_severity"].apply(
+        priority_rank
+    )
+    supervisor_df["priority"] = supervisor_df["disruption_severity"].apply(
+        priority_label
+    )
+    supervisor_df = supervisor_df.sort_values(
+        by=["priority_rank", "sla_deadline", "updated_at"]
+    )
+
+    display_df = build_display_queue(supervisor_df)
+
+    st.dataframe(
+        display_df,
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    selected_case_id = st.selectbox(
+        "Select a supervisor case to review",
+        options=supervisor_df["case_id"].tolist(),
+        key="supervisor_case_selector",
+    )
+
+    selected_case = get_case_by_id(selected_case_id)
+    render_supervisor_case_review(selected_case)
+
 def render_case_detail(case: dict) -> None:
     provider_response = get_recovery_options(case["case_id"])
     policy_result = evaluate_policy(case, provider_response)
@@ -526,6 +705,12 @@ def main() -> None:
         """
     )
 
+    role = st.radio(
+        "Workflow view",
+        options=["Agent View", "Supervisor View"],
+        horizontal=True,
+    )    
+
     cases_df = load_cases()
     cases_df["priority_rank"] = cases_df["disruption_severity"].apply(priority_rank)
     cases_df["priority"] = cases_df["disruption_severity"].apply(priority_label)
@@ -562,63 +747,67 @@ def main() -> None:
 
     st.divider()
 
-    st.subheader("Disruption Queue")
+    if role == "Agent View":
+        st.subheader("Disruption Queue")
 
-    filter_col1, filter_col2, filter_col3 = st.columns(3)
+        filter_col1, filter_col2, filter_col3 = st.columns(3)
 
-    with filter_col1:
-        selected_provider = st.selectbox(
-            "Provider",
-            options=["All"] + sorted(cases_df["provider"].unique().tolist()),
+        with filter_col1:
+            selected_provider = st.selectbox(
+                "Provider",
+                options=["All"] + sorted(cases_df["provider"].unique().tolist()),
+            )
+
+        with filter_col2:
+            selected_severity = st.selectbox(
+                "Severity",
+                options=["All", "critical", "high", "medium", "low"],
+            )
+
+        with filter_col3:
+            selected_disruption = st.selectbox(
+                "Disruption type",
+                options=["All"] + sorted(cases_df["disruption_type"].unique().tolist()),
+            )
+
+        filtered_df = cases_df.copy()
+
+        if selected_provider != "All":
+            filtered_df = filtered_df[filtered_df["provider"] == selected_provider]
+
+        if selected_severity != "All":
+            filtered_df = filtered_df[
+                filtered_df["disruption_severity"] == selected_severity
+            ]
+
+        if selected_disruption != "All":
+            filtered_df = filtered_df[
+                filtered_df["disruption_type"] == selected_disruption
+            ]
+
+        display_df = build_display_queue(filtered_df)
+
+        st.dataframe(
+            display_df,
+            use_container_width=True,
+            hide_index=True,
         )
 
-    with filter_col2:
-        selected_severity = st.selectbox(
-            "Severity",
-            options=["All", "critical", "high", "medium", "low"],
+        st.divider()
+
+        st.subheader("Open a Case")
+
+        selected_case_id = st.selectbox(
+            "Select a case to inspect",
+            options=filtered_df["case_id"].tolist(),
         )
 
-    with filter_col3:
-        selected_disruption = st.selectbox(
-            "Disruption type",
-            options=["All"] + sorted(cases_df["disruption_type"].unique().tolist()),
-        )
+        selected_case = get_case_by_id(selected_case_id)
+        render_case_detail(selected_case)
 
-    filtered_df = cases_df.copy()
-
-    if selected_provider != "All":
-        filtered_df = filtered_df[filtered_df["provider"] == selected_provider]
-
-    if selected_severity != "All":
-        filtered_df = filtered_df[
-            filtered_df["disruption_severity"] == selected_severity
-        ]
-
-    if selected_disruption != "All":
-        filtered_df = filtered_df[
-            filtered_df["disruption_type"] == selected_disruption
-        ]
-
-    display_df = build_display_queue(filtered_df)
-
-    st.dataframe(
-        display_df,
-        use_container_width=True,
-        hide_index=True,
-    )
-
-    st.divider()
-
-    st.subheader("Open a Case")
-
-    selected_case_id = st.selectbox(
-        "Select a case to inspect",
-        options=filtered_df["case_id"].tolist(),
-    )
-
-    selected_case = get_case_by_id(selected_case_id)
-    render_case_detail(selected_case)
-
+    else:
+        render_supervisor_queue(cases_df)
+    
     st.divider()
 
     st.caption(

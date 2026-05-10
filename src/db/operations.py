@@ -1,4 +1,8 @@
 from datetime import datetime, timezone
+from src.workflows.state_transitions import (
+    derive_next_status,
+    derive_supervisor_next_status,
+)
 
 import pandas as pd
 
@@ -162,6 +166,125 @@ def get_audit_events_for_case(case_id: str) -> pd.DataFrame:
                 event_description,
                 created_at
             FROM audit_events
+            WHERE case_id = ?
+            ORDER BY created_at DESC
+            """,
+            connection,
+            params=(case_id,),
+        )
+
+def create_supervisor_decision(
+    case_id: str,
+    supervisor_decision: str,
+    rationale: str,
+) -> int:
+    """Persist supervisor review decision, update case status, and record audit events."""
+    created_at = utc_now_iso()
+    next_status = derive_supervisor_next_status(supervisor_decision)
+
+    with get_connection() as connection:
+        current_case = connection.execute(
+            """
+            SELECT status
+            FROM cases
+            WHERE case_id = ?
+            """,
+            (case_id,),
+        ).fetchone()
+
+        previous_status = current_case["status"] if current_case else "UNKNOWN"
+
+        cursor = connection.execute(
+            """
+            INSERT INTO supervisor_decisions (
+                case_id,
+                supervisor_decision,
+                rationale,
+                previous_status,
+                new_status,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                case_id,
+                supervisor_decision,
+                rationale,
+                previous_status,
+                next_status,
+                created_at,
+            ),
+        )
+
+        supervisor_decision_id = cursor.lastrowid
+
+        connection.execute(
+            """
+            UPDATE cases
+            SET status = ?, updated_at = ?
+            WHERE case_id = ?
+            """,
+            (next_status, created_at, case_id),
+        )
+
+        connection.execute(
+            """
+            INSERT INTO audit_events (
+                case_id,
+                event_type,
+                event_description,
+                created_at
+            )
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                case_id,
+                "supervisor_decision_submitted",
+                (
+                    f"Supervisor submitted decision '{supervisor_decision}' "
+                    f"with rationale."
+                ),
+                created_at,
+            ),
+        )
+
+        connection.execute(
+            """
+            INSERT INTO audit_events (
+                case_id,
+                event_type,
+                event_description,
+                created_at
+            )
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                case_id,
+                "case_status_changed",
+                f"Case status changed from '{previous_status}' to '{next_status}'.",
+                created_at,
+            ),
+        )
+
+        connection.commit()
+
+    return int(supervisor_decision_id)
+
+
+def get_supervisor_decisions_for_case(case_id: str) -> pd.DataFrame:
+    """Return supervisor decision history for a case."""
+    with get_connection() as connection:
+        return pd.read_sql_query(
+            """
+            SELECT
+                supervisor_decision_id,
+                case_id,
+                supervisor_decision,
+                rationale,
+                previous_status,
+                new_status,
+                created_at
+            FROM supervisor_decisions
             WHERE case_id = ?
             ORDER BY created_at DESC
             """,
