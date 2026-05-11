@@ -40,6 +40,13 @@ The MVP will include:
 - Feedback analytics
 - Audit trail
 
+## Supporting Product Artifacts
+
+This project includes additional product documentation:
+
+- [`PRODUCT_NOTES.md`](PRODUCT_NOTES.md) — product thesis, workflows, user roles, AI boundaries, lifecycle states, feedback loop, and future improvements
+- [`TRADEOFFS.md`](TRADEOFFS.md) — key product and system trade-offs behind the prototype
+
 ## Current Status
 
 Project foundation initialized.
