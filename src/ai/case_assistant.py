@@ -103,6 +103,7 @@ def generate_ai_case_assistance(
     provider_response: dict[str, Any],
     policy_result: dict[str, Any],
     weather_context: dict[str, Any] | None = None,
+    force_fallback: bool = False,
 ) -> dict[str, str]:
     """
     Generate an operational brief and passenger message draft.
@@ -119,6 +120,14 @@ def generate_ai_case_assistance(
         case=case,
         provider_response=provider_response,
     )
+
+    if force_fallback:
+        return {
+            "source": "deterministic_fallback",
+            "operational_brief": fallback_summary,
+            "passenger_message": fallback_message,
+            "status": "AI fallback forced by demo control.",
+        }
 
     if not is_openai_configured():
         return {

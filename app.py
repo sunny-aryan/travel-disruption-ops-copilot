@@ -432,11 +432,34 @@ def render_weather_card(weather: dict) -> None:
     st.caption(weather["message"])
 
 
-def render_weather_context(case: dict) -> None:
+def render_weather_context(case: dict, weather_mode: str = "healthy") -> None:
     st.markdown("### Weather Context")
 
-    origin_weather = get_current_weather(case["origin"])
-    destination_weather = get_current_weather(case["destination"])
+    if weather_mode == "force_degraded":
+        origin_weather = {
+            "city": case["origin"],
+            "api_status": "degraded",
+            "source": "Open-Meteo",
+            "temperature_c": None,
+            "precipitation_mm": None,
+            "wind_speed_kmh": None,
+            "weather_risk": "unknown",
+            "message": "Weather fallback forced by demo control.",
+        }
+
+        destination_weather = {
+            "city": case["destination"],
+            "api_status": "degraded",
+            "source": "Open-Meteo",
+            "temperature_c": None,
+            "precipitation_mm": None,
+            "wind_speed_kmh": None,
+            "weather_risk": "unknown",
+            "message": "Weather fallback forced by demo control.",
+        }
+    else:
+        origin_weather = get_current_weather(case["origin"])
+        destination_weather = get_current_weather(case["destination"])
 
     left_col, right_col = st.columns(2)
 
@@ -466,6 +489,7 @@ def render_ai_case_assistance(
     case: dict,
     provider_response: dict,
     policy_result: dict,
+    ai_mode: str = "healthy",
     weather_context: dict | None = None,
 ) -> None:
     st.markdown("### AI Assistance")
@@ -481,6 +505,7 @@ def render_ai_case_assistance(
             provider_response=provider_response,
             policy_result=policy_result,
             weather_context=weather_context,
+            force_fallback=(ai_mode == "force_fallback"),
         )
 
         st.session_state[f"ai_assistance_{case['case_id']}"] = assistance
@@ -798,7 +823,13 @@ def render_feedback_history(case_id: str) -> None:
         hide_index=True,
     )
 
-def render_supervisor_case_review(case: dict) -> None:
+def render_supervisor_case_review(
+    case: dict,
+    demo_controls: dict | None = None,
+) -> None:
+    demo_controls = demo_controls or {}
+    ai_mode = demo_controls.get("ai_mode", "healthy")
+    weather_mode = demo_controls.get("weather_mode", "healthy")
     provider_response = get_recovery_options(case["case_id"])
     policy_result = evaluate_policy(case, provider_response)
 
@@ -842,7 +873,7 @@ def render_supervisor_case_review(case: dict) -> None:
 
     st.divider()
 
-    render_weather_context(case)
+    render_weather_context(case, weather_mode=weather_mode)
 
     st.divider()
 
@@ -850,6 +881,7 @@ def render_supervisor_case_review(case: dict) -> None:
         case=case,
         provider_response=provider_response,
         policy_result=policy_result,
+        ai_mode=ai_mode,
     )
 
     st.divider()
@@ -872,7 +904,10 @@ def render_supervisor_case_review(case: dict) -> None:
 
     render_audit_trail(case["case_id"])
 
-def render_supervisor_queue(cases_df) -> None:
+def render_supervisor_queue(
+    cases_df,
+    demo_controls: dict | None = None,
+) -> None:
     st.subheader("Supervisor Review Queue")
 
     supervisor_df = cases_df[
@@ -908,10 +943,13 @@ def render_supervisor_queue(cases_df) -> None:
     )
 
     selected_case = get_case_by_id(selected_case_id)
-    render_supervisor_case_review(selected_case)
+    render_supervisor_case_review(selected_case, demo_controls=demo_controls)
 
 
-def render_case_detail(case: dict) -> None:
+def render_case_detail(case: dict, demo_controls: dict | None = None) -> None:
+    demo_controls = demo_controls or {}
+    ai_mode = demo_controls.get("ai_mode", "healthy")
+    weather_mode = demo_controls.get("weather_mode", "healthy")
     provider_response = get_recovery_options(case["case_id"])
     policy_result = evaluate_policy(case, provider_response)
     st.subheader(f"Case Detail: {case['case_id']}")
@@ -985,7 +1023,7 @@ def render_case_detail(case: dict) -> None:
 
     st.divider()
 
-    render_weather_context(case)
+    render_weather_context(case, weather_mode=weather_mode)
 
     st.divider()
 
@@ -993,6 +1031,7 @@ def render_case_detail(case: dict) -> None:
         case=case,
         provider_response=provider_response,
         policy_result=policy_result,
+        ai_mode=ai_mode,
     )
 
     st.divider()
@@ -1218,9 +1257,39 @@ def render_analytics_view() -> None:
             hide_index=True,
         )
 
+def render_demo_controls() -> dict:
+    """Render demo controls for simulating external dependency health."""
+    with st.sidebar:
+        st.markdown("## Demo Controls")
+
+        st.caption(
+            "Use these controls to simulate degraded external dependencies during demos."
+        )
+
+        with st.expander("Service Health Controls", expanded=True):
+            ai_mode = st.selectbox(
+                "AI assistance service",
+                options=["healthy", "force_fallback"],
+                index=0,
+                help="Force fallback simulates OpenAI being unavailable.",
+            )
+
+            weather_mode = st.selectbox(
+                "Weather enrichment service",
+                options=["healthy", "force_degraded"],
+                index=0,
+                help="Force degraded simulates Open-Meteo being unavailable.",
+            )
+
+        return {
+            "ai_mode": ai_mode,
+            "weather_mode": weather_mode,
+        }
+
 def main() -> None:
     initialize_database()
     seed_cases_if_empty()
+    demo_controls = render_demo_controls()
     st.title("Travel Disruption Operations Copilot")
 
     st.markdown(
@@ -1329,10 +1398,10 @@ def main() -> None:
         )
 
         selected_case = get_case_by_id(selected_case_id)
-        render_case_detail(selected_case)
+        render_case_detail(selected_case, demo_controls=demo_controls)
 
     elif role == "Supervisor View":
-        render_supervisor_queue(cases_df)
+        render_supervisor_queue(cases_df, demo_controls=demo_controls)
 
     else:
         render_analytics_view()
