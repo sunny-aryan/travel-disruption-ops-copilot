@@ -32,7 +32,7 @@ The MVP will include:
 - SLA and priority indicators
 - Case detail view
 - Mock travel provider dependency
-- Weather enrichment using an external API
+- Weather enrichment using the Open-Meteo API
 - AI-generated case summaries and customer message drafts
 - Deterministic policy checks
 - Agent and supervisor workflows

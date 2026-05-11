@@ -1,4 +1,5 @@
 from src.db.seed import seed_cases_if_empty
+from src.services.weather_client import get_current_weather, weather_risk_label
 from src.db.analytics import (
     get_case_status_summary,
     get_feedback_analytics,
@@ -394,6 +395,71 @@ def format_boolean_label(value) -> str:
     return "Yes" if bool(value) else "No"
 
 
+def format_weather_value(value, suffix: str) -> str:
+    if value is None or pd.isna(value):
+        return "N/A"
+
+    return f"{value:.1f}{suffix}"
+
+
+def weather_api_status_label(status: str) -> str:
+    labels = {
+        "healthy": "🟢 Healthy",
+        "degraded": "🟠 Degraded",
+    }
+
+    return labels.get(status, "⚪ Unknown")
+
+
+def render_weather_card(weather: dict) -> None:
+    st.markdown(f"**{weather['city']}**")
+
+    st.markdown(f"API status: {weather_api_status_label(weather['api_status'])}")
+    st.markdown(f"Weather risk: {weather_risk_label(weather['weather_risk'])}")
+    st.markdown(
+        f"Temperature: {format_weather_value(weather['temperature_c'], '°C')}"
+    )
+    st.markdown(
+        f"Precipitation: {format_weather_value(weather['precipitation_mm'], ' mm')}"
+    )
+    st.markdown(
+        f"Wind speed: {format_weather_value(weather['wind_speed_kmh'], ' km/h')}"
+    )
+    st.markdown(f"Source: {weather['source']}")
+
+    st.caption(weather["message"])
+
+
+def render_weather_context(case: dict) -> None:
+    st.markdown("### Weather Context")
+
+    origin_weather = get_current_weather(case["origin"])
+    destination_weather = get_current_weather(case["destination"])
+
+    left_col, right_col = st.columns(2)
+
+    with left_col:
+        render_weather_card(origin_weather)
+
+    with right_col:
+        render_weather_card(destination_weather)
+
+    if (
+        origin_weather["weather_risk"] == "high"
+        or destination_weather["weather_risk"] == "high"
+    ):
+        st.warning(
+            "High weather risk detected at origin or destination. "
+            "Agent should treat provider ETAs and recovery options with caution."
+        )
+    elif (
+        origin_weather["api_status"] == "degraded"
+        or destination_weather["api_status"] == "degraded"
+    ):
+        st.info(
+            "Weather enrichment is degraded. Continue using provider status and policy evaluation as primary controls."
+        )
+
 def render_decision_history(case_id: str) -> None:
     st.markdown("### Decision History")
 
@@ -726,6 +792,10 @@ def render_supervisor_case_review(case: dict) -> None:
 
     st.divider()
 
+    render_weather_context(case)
+
+    st.divider()
+
     render_policy_evaluation(policy_result)
 
     st.divider()
@@ -781,6 +851,7 @@ def render_supervisor_queue(cases_df) -> None:
 
     selected_case = get_case_by_id(selected_case_id)
     render_supervisor_case_review(selected_case)
+
 
 def render_case_detail(case: dict) -> None:
     provider_response = get_recovery_options(case["case_id"])
@@ -853,6 +924,10 @@ def render_case_detail(case: dict) -> None:
 
     with right_col:
         render_agent_decision_panel(case, policy_result)
+
+    st.divider()
+
+    render_weather_context(case)
 
     st.divider()
 
