@@ -1,4 +1,9 @@
 from src.db.seed import seed_cases_if_empty
+from src.db.analytics import (
+    get_case_status_summary,
+    get_feedback_analytics,
+    get_provider_case_summary,
+)
 from src.db.operations import (
     create_decision,
     create_feedback,
@@ -528,6 +533,53 @@ def render_supervisor_decision_history(case_id: str) -> None:
         hide_index=True,
     )
 
+def value_counts_table(df: pd.DataFrame, column: str, label: str) -> pd.DataFrame:
+    """Build a simple count and percentage table for one categorical column."""
+    if df.empty or column not in df.columns:
+        return pd.DataFrame(columns=[label, "count", "percentage"])
+
+    counts_df = (
+        df[column]
+        .fillna("Unknown")
+        .value_counts()
+        .reset_index()
+    )
+
+    counts_df.columns = [label, "count"]
+
+    total = counts_df["count"].sum()
+
+    if total == 0:
+        counts_df["percentage"] = 0.0
+    else:
+        counts_df["percentage"] = (
+            counts_df["count"] / total * 100
+        ).round(1)
+
+    return counts_df
+
+
+def render_distribution_table(
+    df: pd.DataFrame,
+    column: str,
+    label: str,
+    title: str,
+) -> None:
+    """Render a small distribution table for analytics."""
+    st.markdown(f"### {title}")
+
+    distribution_df = value_counts_table(df, column, label)
+
+    if distribution_df.empty:
+        st.caption("No data available yet.")
+        return
+
+    st.dataframe(
+        distribution_df,
+        use_container_width=True,
+        hide_index=True,
+    )
+
 def render_feedback_capture(case: dict) -> None:
     st.markdown("### Workflow Feedback")
 
@@ -826,6 +878,204 @@ def render_case_detail(case: dict) -> None:
 
     render_audit_trail(case["case_id"]) 
 
+def render_analytics_view() -> None:
+    st.subheader("Workflow Feedback Analytics")
+
+    feedback_df = get_feedback_analytics()
+    status_summary_df = get_case_status_summary()
+    provider_summary_df = get_provider_case_summary()
+
+    if feedback_df.empty:
+        st.info(
+            "No workflow feedback has been submitted yet. "
+            "Submit feedback from Agent View to populate analytics."
+        )
+
+    total_feedback = len(feedback_df)
+    unique_cases_with_feedback = (
+        feedback_df["case_id"].nunique() if not feedback_df.empty else 0
+    )
+
+    negative_or_partial_feedback = 0
+    provider_quality_issues = 0
+
+    if not feedback_df.empty:
+        negative_or_partial_feedback = len(
+            feedback_df[
+                feedback_df["recommendation_usefulness"].isin(
+                    ["Partially useful", "Not useful"]
+                )
+            ]
+        )
+
+        provider_quality_issues = len(
+            feedback_df[
+                feedback_df["provider_data_quality"].isin(
+                    ["Stale", "Missing", "Incorrect"]
+                )
+            ]
+        )
+
+    kpi_col1, kpi_col2, kpi_col3, kpi_col4 = st.columns(4)
+
+    with kpi_col1:
+        st.metric("Feedback records", total_feedback)
+
+    with kpi_col2:
+        st.metric("Cases with feedback", unique_cases_with_feedback)
+
+    with kpi_col3:
+        st.metric("Partial / not useful guidance", negative_or_partial_feedback)
+
+    with kpi_col4:
+        st.metric("Provider data issues", provider_quality_issues)
+
+    st.divider()
+
+    left_col, right_col = st.columns(2)
+
+    with left_col:
+        render_distribution_table(
+            feedback_df,
+            column="recommendation_usefulness",
+            label="Recommendation usefulness",
+            title="Recommendation Usefulness",
+        )
+
+    with right_col:
+        render_distribution_table(
+            feedback_df,
+            column="provider_data_quality",
+            label="Provider data quality",
+            title="Provider Data Quality",
+        )
+
+    st.divider()
+
+    left_col, right_col = st.columns(2)
+
+    with left_col:
+        render_distribution_table(
+            feedback_df,
+            column="override_reason",
+            label="Override / escalation reason",
+            title="Override and Escalation Reasons",
+        )
+
+    with right_col:
+        render_distribution_table(
+            feedback_df,
+            column="customer_outcome",
+            label="Passenger response / outcome",
+            title="Passenger Response / Outcome",
+        )
+
+    st.divider()
+
+    st.markdown("### Feedback by Provider")
+
+    if feedback_df.empty:
+        st.caption("No provider feedback available yet.")
+    else:
+        provider_feedback_df = (
+            feedback_df.groupby("provider")
+            .agg(
+                feedback_count=("feedback_id", "count"),
+                cases_with_feedback=("case_id", "nunique"),
+                provider_data_issues=(
+                    "provider_data_quality",
+                    lambda values: values.isin(
+                        ["Stale", "Missing", "Incorrect"]
+                    ).sum(),
+                ),
+            )
+            .reset_index()
+            .sort_values(by="feedback_count", ascending=False)
+        )
+
+        st.dataframe(
+            provider_feedback_df,
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    st.divider()
+
+    st.markdown("### Feedback by Disruption Type")
+
+    if feedback_df.empty:
+        st.caption("No disruption-type feedback available yet.")
+    else:
+        disruption_feedback_df = (
+            feedback_df.groupby("disruption_type")
+            .agg(
+                feedback_count=("feedback_id", "count"),
+                cases_with_feedback=("case_id", "nunique"),
+            )
+            .reset_index()
+            .sort_values(by="feedback_count", ascending=False)
+        )
+
+        st.dataframe(
+            disruption_feedback_df,
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    st.divider()
+
+    left_col, right_col = st.columns(2)
+
+    with left_col:
+        st.markdown("### Current Case Status Summary")
+
+        if status_summary_df.empty:
+            st.caption("No case status data available.")
+        else:
+            st.dataframe(
+                status_summary_df,
+                use_container_width=True,
+                hide_index=True,
+            )
+
+    with right_col:
+        st.markdown("### Provider Case Summary")
+
+        if provider_summary_df.empty:
+            st.caption("No provider case data available.")
+        else:
+            st.dataframe(
+                provider_summary_df,
+                use_container_width=True,
+                hide_index=True,
+            )
+
+    st.divider()
+
+    st.markdown("### Recent Feedback Records")
+
+    if feedback_df.empty:
+        st.caption("No recent feedback available.")
+    else:
+        recent_feedback_df = feedback_df[
+            [
+                "feedback_id",
+                "case_id",
+                "provider",
+                "disruption_type",
+                "recommendation_usefulness",
+                "provider_data_quality",
+                "override_reason",
+                "customer_outcome",
+                "created_at",
+            ]
+        ].head(10)
+
+        st.dataframe(
+            recent_feedback_df,
+            use_container_width=True,
+            hide_index=True,
+        )
 
 def main() -> None:
     initialize_database()
@@ -841,10 +1091,9 @@ def main() -> None:
 
     role = st.radio(
         "Workflow view",
-        options=["Agent View", "Supervisor View"],
+        options=["Agent View", "Supervisor View", "Analytics View"],
         horizontal=True,
     )
-
     show_success_ack()    
 
     cases_df = load_cases()
@@ -941,8 +1190,11 @@ def main() -> None:
         selected_case = get_case_by_id(selected_case_id)
         render_case_detail(selected_case)
 
-    else:
+    elif role == "Supervisor View":
         render_supervisor_queue(cases_df)
+
+    else:
+        render_analytics_view()
     
     st.divider()
 
