@@ -1,4 +1,5 @@
 from src.db.seed import seed_cases_if_empty
+from src.ai.case_assistant import generate_ai_case_assistance
 from src.config import is_openai_configured
 from src.services.weather_client import get_current_weather, weather_risk_label
 from src.db.analytics import (
@@ -461,6 +462,54 @@ def render_weather_context(case: dict) -> None:
             "Weather enrichment is degraded. Continue using provider status and policy evaluation as primary controls."
         )
 
+def render_ai_case_assistance(
+    case: dict,
+    provider_response: dict,
+    policy_result: dict,
+    weather_context: dict | None = None,
+) -> None:
+    st.markdown("### AI Assistance")
+
+    st.caption(
+        "AI is used to summarize context and draft communication. "
+        "It cannot approve actions, override policy, or update case state."
+    )
+
+    if st.button("Generate AI brief and passenger message", key=f"ai_{case['case_id']}"):
+        assistance = generate_ai_case_assistance(
+            case=case,
+            provider_response=provider_response,
+            policy_result=policy_result,
+            weather_context=weather_context,
+        )
+
+        st.session_state[f"ai_assistance_{case['case_id']}"] = assistance
+
+    assistance = st.session_state.get(f"ai_assistance_{case['case_id']}")
+
+    if not assistance:
+        st.info(
+            "AI assistance has not been generated yet. "
+            "Click the button to create an operational brief and passenger message draft."
+        )
+        return
+
+    if assistance["source"] == "openai":
+        st.success(assistance["status"])
+    else:
+        st.warning(assistance["status"])
+
+    st.markdown("#### Operational Brief")
+    st.write(assistance["operational_brief"])
+
+    st.markdown("#### Passenger Message Draft")
+    st.text_area(
+        "Draft message",
+        value=assistance["passenger_message"],
+        height=180,
+        key=f"ai_message_{case['case_id']}",
+    )
+
 def render_decision_history(case_id: str) -> None:
     st.markdown("### Decision History")
 
@@ -797,6 +846,14 @@ def render_supervisor_case_review(case: dict) -> None:
 
     st.divider()
 
+    render_ai_case_assistance(
+        case=case,
+        provider_response=provider_response,
+        policy_result=policy_result,
+    )
+
+    st.divider()
+
     render_policy_evaluation(policy_result)
 
     st.divider()
@@ -929,6 +986,14 @@ def render_case_detail(case: dict) -> None:
     st.divider()
 
     render_weather_context(case)
+
+    st.divider()
+
+    render_ai_case_assistance(
+        case=case,
+        provider_response=provider_response,
+        policy_result=policy_result,
+    )
 
     st.divider()
 
