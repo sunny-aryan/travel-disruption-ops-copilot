@@ -1,4 +1,5 @@
 from src.db.seed import seed_cases_if_empty
+from src.config import is_openai_configured
 from src.services.weather_client import get_current_weather, weather_risk_label
 from src.db.analytics import (
     get_case_status_summary,
@@ -1272,6 +1273,11 @@ def main() -> None:
         render_analytics_view()
     
     st.divider()
+
+    if is_openai_configured():
+        st.caption("LLM status: OpenAI API key configured locally.")
+    else:
+        st.caption("LLM status: OpenAI API key not configured. AI features will use fallback behavior.")
 
     st.caption(
         "Prototype status: provider dependency responses are mocked to simulate success, timeout, stale data, partial responses, and provider unavailability."
