@@ -89,6 +89,87 @@ def calculate_sla_status(sla_deadline) -> str:
 
     return "🟢 Healthy"
 
+def status_label(status: str) -> str:
+    labels = {
+        "NEW": "🆕 New",
+        "INVESTIGATING": "🔎 Investigating",
+        "WAITING_PROVIDER": "⏳ Waiting Provider",
+        "CUSTOMER_CONTACT_PENDING": "✉️ Customer Contact Pending",
+        "PENDING_SUPERVISOR_APPROVAL": "⚠️ Pending Supervisor Approval",
+        "APPROVED_PENDING_EXECUTION": "✅ Approved Pending Execution",
+        "REJECTED_BY_SUPERVISOR": "⛔ Rejected By Supervisor",
+        "NEEDS_AGENT_FOLLOW_UP": "🔁 Needs Agent Follow-Up",
+        "RESOLVED_REBOOKED": "✅ Resolved Rebooked",
+        "RESOLVED_REFUNDED": "✅ Resolved Refunded",
+        "RESOLVED": "✅ Resolved",
+        "ESCALATED": "🚩 Escalated",
+    }
+
+    return labels.get(status, status)
+
+
+def is_active_status(status: str) -> bool:
+    inactive_statuses = {
+        "RESOLVED",
+        "RESOLVED_REBOOKED",
+        "RESOLVED_REFUNDED",
+        "REJECTED_BY_SUPERVISOR",
+    }
+
+    return status not in inactive_statuses
+
+
+def action_needed_label(status: str) -> str:
+    labels = {
+        "NEW": "Agent review",
+        "INVESTIGATING": "Agent investigation",
+        "WAITING_PROVIDER": "Wait / refresh provider",
+        "CUSTOMER_CONTACT_PENDING": "Contact passenger",
+        "PENDING_SUPERVISOR_APPROVAL": "Supervisor review",
+        "APPROVED_PENDING_EXECUTION": "Execute approved action",
+        "REJECTED_BY_SUPERVISOR": "No active action",
+        "NEEDS_AGENT_FOLLOW_UP": "Agent follow-up",
+        "RESOLVED_REBOOKED": "No active action",
+        "RESOLVED_REFUNDED": "No active action",
+        "RESOLVED": "No active action",
+        "ESCALATED": "Escalation follow-up",
+    }
+
+    return labels.get(status, "Review required")
+
+
+def action_needed_rank(action_needed: str) -> int:
+    rank = {
+        "Supervisor review": 1,
+        "Agent follow-up": 2,
+        "Execute approved action": 3,
+        "Agent review": 4,
+        "Agent investigation": 5,
+        "Contact passenger": 6,
+        "Wait / refresh provider": 7,
+        "Escalation follow-up": 8,
+        "Review required": 9,
+        "No active action": 99,
+    }
+
+    return rank.get(action_needed, 50)
+
+
+def sla_status_rank(sla_status: str) -> int:
+    if "Breached" in sla_status:
+        return 1
+
+    if "At risk" in sla_status:
+        return 2
+
+    if "Watch" in sla_status:
+        return 3
+
+    if "Healthy" in sla_status:
+        return 4
+
+    return 5
+
 
 def build_display_queue(cases_df):
     display_df = cases_df[
@@ -110,15 +191,19 @@ def build_display_queue(cases_df):
 
     display_df["route"] = display_df["origin"] + " → " + display_df["destination"]
     display_df["special_flags"] = display_df["special_flags"].apply(format_flags)
+    display_df["sla_status"] = display_df["sla_deadline"].apply(calculate_sla_status)
     display_df["sla_deadline"] = display_df["sla_deadline"].dt.strftime(
         "%d %b %Y, %H:%M"
     )
+    display_df["status"] = display_df["status"].apply(status_label)
+    display_df["action_needed"] = cases_df["status"].apply(action_needed_label)
 
     return display_df[
         [
             "case_id",
             "priority",
-            "sla_deadline",
+            "sla_status",
+            "action_needed",
             "provider",
             "route",
             "disruption_type",
@@ -127,6 +212,7 @@ def build_display_queue(cases_df):
             "special_flags",
             "status",
             "recommended_next_action",
+            "sla_deadline",
         ]
     ]
 
@@ -1286,6 +1372,30 @@ def render_demo_controls() -> dict:
             "weather_mode": weather_mode,
         }
 
+def render_queue_summary(cases_df) -> None:
+    st.markdown("### Queue Summary")
+
+    active_cases = len(cases_df[cases_df["status"].apply(is_active_status)])
+    pending_supervisor = len(
+        cases_df[cases_df["status"] == "PENDING_SUPERVISOR_APPROVAL"]
+    )
+    waiting_provider = len(cases_df[cases_df["status"] == "WAITING_PROVIDER"])
+    needs_agent_follow_up = len(cases_df[cases_df["status"] == "NEEDS_AGENT_FOLLOW_UP"])
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        st.metric("Active cases", active_cases)
+
+    with col2:
+        st.metric("Supervisor review", pending_supervisor)
+
+    with col3:
+        st.metric("Waiting provider", waiting_provider)
+
+    with col4:
+        st.metric("Agent follow-up", needs_agent_follow_up)
+
 def main() -> None:
     initialize_database()
     seed_cases_if_empty()
@@ -1317,11 +1427,7 @@ def main() -> None:
     open_cases = len(cases_df[cases_df["status"] != "RESOLVED"])
     critical_cases = len(cases_df[cases_df["disruption_severity"] == "critical"])
     supervisor_review_cases = len(
-        cases_df[
-            cases_df["recommended_next_action"]
-            .str.lower()
-            .str.contains("supervisor|escalate", regex=True)
-        ]
+        cases_df[cases_df["status"] == "PENDING_SUPERVISOR_APPROVAL"]
     )
 
     st.divider()
@@ -1335,7 +1441,7 @@ def main() -> None:
         st.metric("Critical cases", critical_cases)
 
     with kpi_col3:
-        st.metric("Needs escalation", supervisor_review_cases)
+        st.metric("Needs supervisor review", supervisor_review_cases)
 
     with kpi_col4:
         st.metric("Providers affected", cases_df["provider"].nunique())
@@ -1345,7 +1451,11 @@ def main() -> None:
     if role == "Agent View":
         st.subheader("Disruption Queue")
 
-        filter_col1, filter_col2, filter_col3 = st.columns(3)
+        render_queue_summary(cases_df)
+
+        st.divider()
+
+        filter_col1, filter_col2, filter_col3, filter_col4 = st.columns(4)
 
         with filter_col1:
             selected_provider = st.selectbox(
@@ -1360,12 +1470,44 @@ def main() -> None:
             )
 
         with filter_col3:
+            selected_status = st.selectbox(
+                "Status",
+                options=["All"] + sorted(cases_df["status"].unique().tolist()),
+            )
+
+        with filter_col4:
+            selected_action_needed = st.selectbox(
+                "Action needed",
+                options=["All"]
+                + sorted(cases_df["status"].apply(action_needed_label).unique().tolist()),
+            )
+
+        filter_col5, filter_col6 = st.columns([1, 3])
+
+        with filter_col5:
+            active_only = st.toggle(
+                "Active cases only",
+                value=True,
+                help="Hides terminal cases such as resolved or supervisor-rejected cases.",
+            )
+
+        with filter_col6:
             selected_disruption = st.selectbox(
                 "Disruption type",
                 options=["All"] + sorted(cases_df["disruption_type"].unique().tolist()),
             )
 
         filtered_df = cases_df.copy()
+
+        filtered_df["sla_status"] = filtered_df["sla_deadline"].apply(calculate_sla_status)
+        filtered_df["sla_rank"] = filtered_df["sla_status"].apply(sla_status_rank)
+        filtered_df["action_needed"] = filtered_df["status"].apply(action_needed_label)
+        filtered_df["action_needed_rank"] = filtered_df["action_needed"].apply(
+            action_needed_rank
+        )
+
+        if active_only:
+            filtered_df = filtered_df[filtered_df["status"].apply(is_active_status)]
 
         if selected_provider != "All":
             filtered_df = filtered_df[filtered_df["provider"] == selected_provider]
@@ -1375,10 +1517,32 @@ def main() -> None:
                 filtered_df["disruption_severity"] == selected_severity
             ]
 
+        if selected_status != "All":
+            filtered_df = filtered_df[filtered_df["status"] == selected_status]
+
+        if selected_action_needed != "All":
+            filtered_df = filtered_df[
+                filtered_df["action_needed"] == selected_action_needed
+            ]
+
         if selected_disruption != "All":
             filtered_df = filtered_df[
                 filtered_df["disruption_type"] == selected_disruption
             ]
+
+        filtered_df = filtered_df.sort_values(
+            by=[
+                "action_needed_rank",
+                "priority_rank",
+                "sla_rank",
+                "sla_deadline",
+                "departure_time",
+            ]
+        )
+
+        if filtered_df.empty:
+            st.info("No cases match the selected filters.")
+            return
 
         display_df = build_display_queue(filtered_df)
 
