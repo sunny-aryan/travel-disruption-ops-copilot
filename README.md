@@ -393,20 +393,61 @@ The project is locally runnable and uses SQLite for persisted workflow state.
 
 ## Product Walkthrough
 
-Screenshots will be added in a later polish commit.
+### 1. Agent Disruption Queue
 
-Planned walkthrough sections:
+The Agent View gives operations users a prioritized queue of disrupted bookings. Agents can filter by provider, severity, status, action needed, and disruption type. The queue highlights SLA status and operational next steps to reduce cognitive load.
 
-1. Agent disruption queue
-2. Case detail and provider dependency status
-3. Weather enrichment
-4. AI operational brief and passenger message draft
-5. Deterministic policy evaluation
-6. Policy-aware decision submission
-7. Supervisor review workflow
-8. Feedback capture
-9. Analytics view
-10. Demo controls for degraded AI and weather fallback
+![Agent Disruption Queue](screenshots/01a-agent-queue.png)
+![Agent Disruption Queue](screenshots/01b-agent-queue.png)
+
+### 2. Case Detail and Provider Dependency Status
+
+The case detail view shows passenger context, route, disruption type, ticket value, special flags, provider dependency status, and provider-aware guidance.
+
+![Case Detail and Provider Status](screenshots/02a-case-detail-provider-status.png)
+![Case Detail and Provider Status](screenshots/02b-case-detail-provider-status.png)
+
+### 3. Weather Enrichment
+
+The app enriches disrupted bookings with current weather context from Open-Meteo for origin and destination cities. Weather is contextual only; deterministic policy remains the authority for workflow actions.
+
+![Weather Enrichment](screenshots/03-weather-enrichment.png)
+
+### 4. AI Assistance
+
+The AI assistant generates an operational brief and passenger message draft. AI reduces agent cognitive load but cannot approve actions, override policy, or update case state.
+
+![AI Assistance](screenshots/04a-ai-assistance.png)
+![AI Assistance](screenshots/04b-ai-assistance.png)
+
+### 5. Policy-Aware Decisioning
+
+The deterministic policy engine separates allowed actions, blocked actions, and actions requiring supervisor approval. The decision panel only surfaces policy-valid or approval-required actions.
+
+![Policy-Aware Decisioning](screenshots/05-policy-aware-decision.png)
+
+### 6. Supervisor Review Workflow
+
+Approval-required cases move into the Supervisor View, where supervisors can approve, reject, or request more information with rationale. Supervisor decisions update case state and are recorded in the audit trail.
+
+![Supervisor Review Workflow](screenshots/06a-supervisor-review.png)
+![Supervisor Review Workflow](screenshots/06b-supervisor-review.png)
+
+### 7. Workflow Feedback Analytics
+
+Feedback analytics aggregate case-level feedback across recommendation usefulness, provider data quality, override reasons, passenger outcomes, providers, and disruption types.
+
+![Workflow Feedback Analytics](screenshots/07a-feedback-analytics.png)
+![Workflow Feedback Analytics](screenshots/07b-feedback-analytics.png)
+![Workflow Feedback Analytics](screenshots/07c-feedback-analytics.png)
+![Workflow Feedback Analytics](screenshots/07d-feedback-analytics.png)
+
+### 8. Demo Controls and Degraded Mode
+
+Sidebar demo controls make dependency degradation easy to test. The app can force AI fallback and weather degradation without changing code or relying on real outages.
+
+![Demo Controls and Degraded Mode](screenshots/08a-demo-controls-degraded-mode.png)
+![Demo Controls and Degraded Mode](screenshots/08b-demo-controls-degraded-mode.png)
 
 ---
 
@@ -584,4 +625,4 @@ For detailed trade-offs, see [`TRADEOFFS.md`](TRADEOFFS.md).
 - Add provider incident clustering
 - Add automated tests for policy and state transitions
 - Move from SQLite to Postgres for production-style deployment
-- Add screenshots and a guided README walkthrough
+- Add short demo video or GIF walkthrough for the main agent and supervisor workflows
